@@ -99,6 +99,11 @@ byte jointIdx = 0;
 
 //bool Xconfig = false;
 
+//We aim to go round the loop() once every 50ms.  That means we're sending 20 updates per second, unless
+//we decide that's too bonkers and intentionally skip some data on some passes.
+//Quick maths: 57600bps / 20 = 2880 byte budget.
+//However, when we start up, we don't want to spam the serial port, so tick once a second.
+int16_t tickMS = 1000;
 
 unsigned long usedTime = 0;
 void getFIFO() {//get FIFO only without further processing
@@ -209,6 +214,10 @@ void shutServo(int i){
 void shutServoCommand() {
   int16_t index = stackPopToNative();
   shutServo(index);
+}
+
+void updateTickMSCommand() {
+  tickMS = stackPopToNative();
 }
 
 void setup() {
@@ -343,6 +352,7 @@ void initCommands(){
   addNativeFun("d", failsafe);
   addNativeFun("g", pushMotorAngle);
   addNativeFun("s", shutServoCommand);
+  addNativeFun("t", updateTickMSCommand);
 }
 
 void printHeader(){
@@ -382,6 +392,15 @@ void printStartTime(unsigned long ms){
   PTL(ms);
 }
 
+void printMotors(){
+  PT("m ");
+  for(int i = 0; i < DOF; i++){
+    PT(motorCommand[i]);
+    PT(" ");
+  }
+  PTL();
+}
+
 void readSerial(){
   while (Serial.available() > 0){
     String line = Serial.readStringUntil('\n');
@@ -409,10 +428,7 @@ void driveBeeper(long beepTimeMS) {
   delay(beepTimeMS);
 }
 
-//We aim to go round the loop() once every 50ms.  That means we're sending 20 updates per second, unless
-//we decide that's too bonkers and intentionally skip some data on some passes.
-//Quick maths: 57600bps / 20 = 2880 byte budget.
-#define TICK_MS 50
+
 void loop() {
   unsigned long loopStart = millis();
   printHeader();
@@ -424,10 +440,11 @@ void loop() {
   printGravity();
   printIR();
   printUltrasound();
+  printMotors();
 
   readSerial();
   driveMotors();
 
-  long toDelayMS = TICK_MS - (millis() - loopStart);
+  long toDelayMS = tickMS - (millis() - loopStart);
   driveBeeper(toDelayMS);
 }

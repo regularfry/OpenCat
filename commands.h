@@ -140,18 +140,21 @@ void interpret(){
   int start = 0;
   // Skip any leading whitespace
   while (start < bufLen) {
-    while (isWhitespace(inbuf[start]) && inbuf[start]) { start++; }
+    while (!isGraph(inbuf[start]) && inbuf[start]) { start++; }
     int symLen = 0;
     // Find how long this symbol is
-    while (!isWhitespace(inbuf[start+symLen]) && inbuf[start+symLen]){ symLen++; }
+    while (isGraph(inbuf[start+symLen]) && inbuf[start+symLen]){ symLen++; }
     if (symLen > 0) {
         lookupWord(start, symLen); //leaves the dict entry on the stack
         if (itemIsTruthy()) { executeItem(); /* removes the dict entry from the stack */}
         else {
             stackPop(); //removes the dict entry from the stack
             if(!slurpNumber(start, symLen)) {
-                PT("Unknown word: ");
-                for(int i = start;i < start+symLen; i++){ PT(inbuf[i]); } PTL("");
+                PT("e Unknown word: ");
+                for(int i = start;i < start+symLen; i++){ PT(inbuf[i]); }
+                PT(" (");
+                for(int i = start; i < start+symLen; i++){ PT((int)inbuf[i]); PT(" "); }
+                PTL(")");
                 break;
             }
         }
