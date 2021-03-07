@@ -1,7 +1,7 @@
 #include <string.h>
 
-char *inbuf;
-int bufLen = 0;
+#define LINE_LEN 64
+char inbuf[LINE_LEN]; // used to copy the serial buffer out so we don't lose the data when more comes in
 
 typedef void (*nativeFun)();
 typedef nativeFun item;
@@ -136,10 +136,13 @@ int slurpNumber(int start, int symLen){
     return 1;
 }
 
-void interpret(){
+void interpret(char *serial, int len){
+  memset(inbuf, '\0', LINE_LEN);
+  memcpy(inbuf, serial, len);
   int start = 0;
+
   // Skip any leading whitespace
-  while (start < bufLen) {
+  while (start < len) {
     while (!isGraph(inbuf[start]) && inbuf[start]) { start++; }
     int symLen = 0;
     // Find how long this symbol is

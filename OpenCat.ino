@@ -61,6 +61,10 @@ uint8_t fifoBuffer[PACKET_SIZE]; // FIFO storage buffer
 Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 
+// Serial readuntil timeout. Set to -1 to disable the timeout and
+// hand loop control entirely over to the host.
+#define SERIAL_TIMEOUT_MS -1
+
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
 // ================================================================
@@ -195,6 +199,7 @@ void setMotorAngle(){
   }
 }
 
+
 void pushMotorAngle(){
   int16_t index = stackPopToNative();
   stackPush((item)motorCommand[index]);
@@ -220,6 +225,17 @@ void updateTickMSCommand() {
   tickMS = stackPopToNative();
 }
 
+void printState(){
+  printTimestamp();
+  getYPR();
+  printVoltage(analogRead(BATT));
+  printGravity();
+  printIR();
+  printUltrasound();
+  printMotors();
+  printHeader();
+}
+
 void setup() {
   pinMode(BUZZER, OUTPUT);
 #ifdef PIXEL_PIN
@@ -240,7 +256,7 @@ void setup() {
 #endif
 
   Serial.begin(BAUD_RATE);
-  Serial.setTimeout(10);
+  Serial.setTimeout(SERIAL_TIMEOUT_MS);
   while (!Serial);
   // wait for ready
   while (Serial.available() && Serial.read()); // empty buffer
@@ -249,13 +265,10 @@ void setup() {
   PTLF("Initialize I2C");
   PTLF("Connect MPU6050");
   mpu.initialize();
-  //do
-  {
-    delay(500);
-    // verify connection
-    PTLF("Test connection");
-    PTL(mpu.testConnection() ? F("MPU successful") : F("MPU failed"));//sometimes it shows "failed" but is ok to bypass.
-  } //while (!mpu.testConnection());
+  delay(500);
+  // verify connection
+  PTLF("Test connection");
+  PTL(mpu.testConnection() ? F("MPU successful") : F("MPU failed"));//sometimes it shows "failed" but is ok to bypass.
 
   // load and configure the DMP
   do {
@@ -344,8 +357,8 @@ void setup() {
   pinMode(BUZZER, OUTPUT);
   //meow();
   initCommands();
+  prompt();
 }
-
 
 void initCommands(){
   addNativeFun("m", setMotorAngle);
@@ -353,15 +366,17 @@ void initCommands(){
   addNativeFun("g", pushMotorAngle);
   addNativeFun("s", shutServoCommand);
   addNativeFun("t", updateTickMSCommand);
+  addNativeFun("p", printState);
 }
 
 void printHeader(){
-  PTL("-- ");
+  PT("-- ");
 }
 
 void printVoltage(float voltage){
   PT("b ");
-  PTL(voltage);
+  PT(voltage);
+  PTL();
 }
 
 void printGravity(){
@@ -370,14 +385,16 @@ void printGravity(){
   PT(" ");
   PT(gravity.y);
   PT(" ");
-  PTL(gravity.z);
+  PT(gravity.z);
+  PTL();
 }
 
 void printIR(){
   //Rather than try to decode on-device, just plonk the IR code directly out on the serial line.
   if (irrecv.decode(&results)){
     PT("i ");
-    PTL(results.value);
+    PT(results.value);
+    PTL();
     irrecv.resume();
   }
 }
@@ -387,9 +404,14 @@ void printUltrasound(){
   //hc-sr04 gives an 8m range, which isn't useful.
 }
 
-void printStartTime(unsigned long ms){
+void printTime(unsigned long ms){
   PT("t ");
-  PTL(ms);
+  PT(ms);
+  PTL();
+}
+
+void printTimestamp(){
+  printTime(millis());
 }
 
 void printMotors(){
@@ -401,16 +423,26 @@ void printMotors(){
   PTL();
 }
 
-void readSerial(){
-  while (Serial.available() > 0){
-    String line = Serial.readStringUntil('\n');
-    PTL(line);
-    inbuf = line.c_str();
-    bufLen = line.length();
-    interpret();
-  }
+void prompt(){
+  PT("> ");
 }
 
+void readSerial(){
+  char *serial_c_str;
+  size_t len;
+
+  do {
+    String line = Serial.readStringUntil('\n');
+    PTL();
+    serial_c_str = line.c_str();
+    len = line.length();
+    if(len > 0){
+      interpret(serial_c_str, len);
+      PTL();
+      prompt();
+    }
+  } while (Serial.available() > 0);
+}
 
 void driveMotors(){
   for (int i = 0; i < DOF; i++){
@@ -423,28 +455,8 @@ void driveMotors(){
   }
 }
 
-void driveBeeper(long beepTimeMS) {
-  if (beepTimeMS < 0) { return; }
-  delay(beepTimeMS);
-}
-
-
 void loop() {
-  unsigned long loopStart = millis();
-  printHeader();
-  printStartTime(loopStart);
-
-  printVoltage(analogRead(BATT));
-
-  getYPR();
-  printGravity();
-  printIR();
-  printUltrasound();
-  printMotors();
-
   readSerial();
-  driveMotors();
 
-  long toDelayMS = tickMS - (millis() - loopStart);
-  driveBeeper(toDelayMS);
+  driveMotors();
 }
