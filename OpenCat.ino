@@ -103,12 +103,6 @@ byte jointIdx = 0;
 
 //bool Xconfig = false;
 
-//We aim to go round the loop() once every 50ms.  That means we're sending 20 updates per second, unless
-//we decide that's too bonkers and intentionally skip some data on some passes.
-//Quick maths: 57600bps / 20 = 2880 byte budget.
-//However, when we start up, we don't want to spam the serial port, so tick once a second.
-int16_t tickMS = 1000;
-
 unsigned long usedTime = 0;
 void getFIFO() {//get FIFO only without further processing
   while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
@@ -183,7 +177,7 @@ void getYPR() {//get YPR angles from FIFO data, takes time
 
 int16_t motorCommand[DOF];
 
-void setMotorAngle(){
+void c_setMotorAngle(){
   //(n n -- ) -- "1 2 m" will set motor 2's angle to 1 degree.
   // These angles are read in as int16_t's, but they end up passed to calibratedPWM as floats.
   // This means that we've got a lot of wasted resolution at the moment: we can only move in
@@ -200,12 +194,12 @@ void setMotorAngle(){
 }
 
 
-void pushMotorAngle(){
+void c_pushMotorAngle(){
   int16_t index = stackPopToNative();
   stackPush((item)motorCommand[index]);
 }
 
-void failsafe(){
+void c_failsafe(){
   shutServos();
   for(int i = 0; i < DOF; i++){
     motorCommand[i] = 256;
@@ -216,16 +210,12 @@ void shutServo(int i){
   pwm.setPWM(i, 0, 4096);
 }
 
-void shutServoCommand() {
+void c_shutServo() {
   int16_t index = stackPopToNative();
   shutServo(index);
 }
 
-void updateTickMSCommand() {
-  tickMS = stackPopToNative();
-}
-
-void printState(){
+void c_printState(){
   printTimestamp();
   getYPR();
   printVoltage(analogRead(BATT));
@@ -344,7 +334,7 @@ void setup() {
       calibratedDuty0[i] =  SERVOMIN + PWM_RANGE / 2 + float(middleShift(i) + servoCalibs[i]) * pulsePerDegree[i]  * rotationDirection(i) ;
       //PTL(SERVOMIN + PWM_RANGE / 2 + float(middleShift(i) + servoCalibs[i]) * pulsePerDegree[i] * rotationDirection(i) );
       calibratedPWM(i, motion.dutyAngles[i]);
-      failsafe();
+      c_failsafe();
       delay(20);
     }
     randomSeed(analogRead(0));//use the fluctuation of voltage caused by servos as entropy pool
@@ -361,12 +351,11 @@ void setup() {
 }
 
 void initCommands(){
-  addNativeFun("m", setMotorAngle);
-  addNativeFun("d", failsafe);
-  addNativeFun("g", pushMotorAngle);
-  addNativeFun("s", shutServoCommand);
-  addNativeFun("t", updateTickMSCommand);
-  addNativeFun("p", printState);
+  addNativeFun("m", c_setMotorAngle);
+  addNativeFun("d", c_failsafe);
+  addNativeFun("g", c_pushMotorAngle);
+  addNativeFun("s", c_shutServo);
+  addNativeFun("p", c_printState);
 }
 
 void printHeader(){
