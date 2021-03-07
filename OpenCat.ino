@@ -215,6 +215,17 @@ void c_shutServo() {
   shutServo(index);
 }
 
+void c_beep() {
+  int16_t durationMS = stackPopToNative();
+  int16_t note = stackPopToNative();
+  beep(note, durationMS);
+}
+
+void c_sleep(){
+  int16_t durationMS = stackPopToNative();
+  delay(durationMS);
+}
+
 void c_printState(){
   printTimestamp();
   getYPR();
@@ -356,6 +367,8 @@ void initCommands(){
   addNativeFun("g", c_pushMotorAngle);
   addNativeFun("s", c_shutServo);
   addNativeFun("p", c_printState);
+  addNativeFun("b", c_beep);
+  addNativeFun("sleep", c_sleep);
 }
 
 void printHeader(){
