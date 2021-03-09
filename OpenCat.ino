@@ -61,6 +61,8 @@ uint8_t fifoBuffer[PACKET_SIZE]; // FIFO storage buffer
 Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 
+int16_t motorCommand[DOF];
+
 // Serial readuntil timeout. Set to -1 to disable the timeout and
 // hand loop control entirely over to the host.
 #define SERIAL_TIMEOUT_MS -1
@@ -80,30 +82,6 @@ void dmpDataReady() {
 IRrecv irrecv(IR_RECIEVER);     // create instance of 'irrecv'
 decode_results results;      // create instance of 'decode_results'
 
-char token;
-char lastToken;
-#define CMD_LEN 10
-char *lastCmd = new char[CMD_LEN];
-char *newCmd = new char[CMD_LEN];
-byte newCmdIdx = 0;
-byte hold = 0;
-int8_t offsetLR = 0;
-bool checkGyro = true;
-int8_t skipGyro = 2;
-
-#define COUNT_DOWN 60
-
-uint8_t timer = 0;
-//#define SKIP 1
-#ifdef SKIP
-byte updateFrame = 0;
-#endif
-byte firstMotionJoint;
-byte jointIdx = 0;
-
-//bool Xconfig = false;
-
-unsigned long usedTime = 0;
 void getFIFO() {//get FIFO only without further processing
   while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
 
@@ -174,8 +152,6 @@ void getYPR() {//get YPR angles from FIFO data, takes time
 
   }
 }
-
-int16_t motorCommand[DOF];
 
 void c_setMotorAngle(){
   //(n n -- ) -- "1 2 m" will set motor 2's angle to 1 degree.
@@ -360,27 +336,22 @@ void setup() {
     pwm.setPWMFreq(60 * PWM_FACTOR); // Analog servos run at ~60 Hz updates
     delay(200);
 
-    //meow();
-    strcpy(lastCmd, "rest");
-    motion.loadBySkillName(lastCmd);
+    motion.loadBySkillName("rest");
     for (int8_t i = DOF - 1; i >= 0; i--) {
       pulsePerDegree[i] = float(PWM_RANGE) / servoAngleRange(i);
       servoCalibs[i] = servoCalib(i);
       calibratedDuty0[i] =  SERVOMIN + PWM_RANGE / 2 + float(middleShift(i) + servoCalibs[i]) * pulsePerDegree[i]  * rotationDirection(i) ;
       //PTL(SERVOMIN + PWM_RANGE / 2 + float(middleShift(i) + servoCalibs[i]) * pulsePerDegree[i] * rotationDirection(i) );
       calibratedPWM(i, motion.dutyAngles[i]);
-      c_failsafe();
       delay(20);
     }
     randomSeed(analogRead(0));//use the fluctuation of voltage caused by servos as entropy pool
-    shutServos();
-    token = T_REST;
+    c_failsafe();
   }
   beep(30);
 
   pinMode(BATT, INPUT);
   pinMode(BUZZER, OUTPUT);
-  //meow();
   initCommands();
   prompt();
 }
