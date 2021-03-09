@@ -193,6 +193,29 @@ void c_setMotorAngle(){
   }
 }
 
+void c_setLegAngles(){
+  int16_t index = stackPopToNative();
+
+  stackPush((item)(index + 12));
+  c_setMotorAngle();
+
+  stackPush((item)(index + 8));
+  c_setMotorAngle();
+}
+
+void c_pose(){
+  for(int16_t i = 15; i >= 0; i--){
+    stackPush((item)i);
+    c_setMotorAngle();
+  }
+}
+
+void c_legPose(){
+  for(int16_t i = 15; i >= 8; i--){
+    stackPush((item)i);
+    c_setMotorAngle();
+  }
+}
 
 void c_pushMotorAngle(){
   int16_t index = stackPopToNative();
@@ -226,7 +249,7 @@ void c_sleep(){
   delay(durationMS);
 }
 
-void c_printState(){
+void c_printState(item*){
   printTimestamp();
   getYPR();
   printVoltage(analogRead(BATT));
@@ -236,6 +259,7 @@ void c_printState(){
   printMotors();
   printHeader();
 }
+
 
 void setup() {
   pinMode(BUZZER, OUTPUT);
@@ -367,8 +391,11 @@ void initCommands(){
   addNativeFun("g", c_pushMotorAngle);
   addNativeFun("s", c_shutServo);
   addNativeFun("p", c_printState);
-  addNativeFun("b", c_beep);
+  addNativeFun("beep", c_beep);
   addNativeFun("sleep", c_sleep);
+  addNativeFun("leg", c_setLegAngles);
+  addNativeFun("pose", c_pose);
+  addNativeFun("legpose", c_legPose);
 }
 
 void printHeader(){
