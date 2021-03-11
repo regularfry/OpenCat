@@ -27,6 +27,7 @@
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
 */
+#include "protothreads.h"
 #define MAIN_SKETCH
 #include "WriteInstinct/OpenCat.h"
 #include "interpreter.h"
@@ -62,6 +63,14 @@ Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 
 int16_t motorCommand[DOF];
+
+#define ULTRA_SOUND
+#define ULTRA_VCC 8
+#define TRIGGER 9
+#define ECHO 10
+#define LONGEST_DISTANCE 200 //cm; this sets the max delay for the ultrasound
+
+float ultraDistance;
 
 // Serial readuntil timeout. Set to -1 to disable the timeout and
 // hand loop control entirely over to the host.
@@ -153,6 +162,52 @@ void getYPR() {//get YPR angles from FIFO data, takes time
   }
 }
 
+
+void ultraSetup(){
+ pinMode(ULTRA_VCC, OUTPUT);
+ digitalWrite(ULTRA_VCC, HIGH);
+ pinMode(TRIGGER, OUTPUT);
+ pinMode(ECHO, INPUT);
+}
+
+pt ptUltra;
+int ultraThread(struct pt* pt) {
+    static int duration = 0;
+    static float distance = 0.0;
+    static float farTime =  LONGEST_DISTANCE*2/0.034;
+
+
+    PT_BEGIN(pt);
+
+    // Loop forever
+    for(;;) {
+        digitalWrite(TRIGGER, LOW);   // turn the LED on (HIGH is the voltage level)
+        PT_SLEEP(pt, 2e-3);
+        digitalWrite(TRIGGER, HIGH);    // turn the LED off by making the voltage LOW
+        PT_SLEEP(pt, 10e-3);
+        digitalWrite(TRIGGER, LOW);
+
+        // Reads the echoPin, returns the sound wave travel time in microseconds
+        duration = pulseIn(ECHO, HIGH, farTime);
+
+        // Calculating the distance
+        ultraDistance = duration * 0.034 / 2; // 10^-6 * 34000 cm/s
+        PT_SLEEP(pt, 100);
+    }
+
+    PT_END(pt);
+}
+
+pt ptGyro;
+int gyroThread(struct pt* pt){
+  PT_BEGIN(pt);
+  for(;;) {
+    getYPR();
+    PT_SLEEP(pt, 50);
+  }
+  PT_END(pt);
+}
+
 void c_setMotorAngle(){
   //(n n -- ) -- "1 2 m" will set motor 2's angle to 1 degree.
   // These angles are read in as int16_t's, but they end up passed to calibratedPWM as floats.
@@ -227,7 +282,6 @@ void c_sleep(){
 
 void c_printState(item*){
   printTimestamp();
-  getYPR();
   printVoltage(analogRead(BATT));
   printGravity();
   printIR();
@@ -237,8 +291,123 @@ void c_printState(item*){
 }
 
 
+
+void initCommands(){
+  addNativeFun("m", c_setMotorAngle);
+  addNativeFun("d", c_failsafe);
+  addNativeFun("g", c_pushMotorAngle);
+  addNativeFun("s", c_shutServo);
+  addNativeFun("p", c_printState);
+  addNativeFun("beep", c_beep);
+  addNativeFun("sleep", c_sleep);
+  addNativeFun("leg", c_setLegAngles);
+  addNativeFun("pose", c_pose);
+  addNativeFun("legpose", c_legPose);
+}
+
+void printHeader(){
+  PT("-- ");
+}
+
+void printVoltage(float voltage){
+  PT("b ");
+  PT(voltage);
+  PTL();
+}
+
+void printGravity(){
+  PT("g ");
+  PT(gravity.x);
+  PT(" ");
+  PT(gravity.y);
+  PT(" ");
+  PT(gravity.z);
+  PTL();
+}
+
+void printIR(){
+  //Rather than try to decode on-device, just plonk the IR code directly out on the serial line.
+  if (irrecv.decode(&results)){
+    PT("i ");
+    PT(results.value);
+    PTL();
+    irrecv.resume();
+  }
+}
+
+void printUltrasound(){
+  PT("u ");
+  PT(ultraDistance);
+  PTL();
+}
+
+void printTime(unsigned long ms){
+  PT("t ");
+  PT(ms);
+  PTL();
+}
+
+void printTimestamp(){
+  printTime(millis());
+}
+
+void printMotors(){
+  PT("m ");
+  for(int i = 0; i < DOF; i++){
+    PT(motorCommand[i]);
+    PT(" ");
+  }
+  PTL();
+}
+
+void prompt(){
+  PT("> ");
+}
+
+void readSerial(){
+  char *serial_c_str;
+  size_t len;
+
+  do {
+    String line = Serial.readStringUntil('\n');
+    PTL();
+    serial_c_str = line.c_str();
+    len = line.length();
+    if(len > 0){
+      interpret(serial_c_str, len);
+      PTL();
+      prompt();
+    }
+  } while (Serial.available() > 0);
+}
+
+void driveMotors(){
+  for (int i = 0; i < DOF; i++){
+    int16_t value = motorCommand[i];
+    if (value < -128 || value >= 128){
+      shutServo(i);
+    } else {
+      calibratedPWM(i, value);
+    }
+  }
+}
+
+pt ptSerial;
+int serialThread(struct pt* pt) {
+  PT_BEGIN(pt);
+  for(;;){
+    if (Serial.available() > 0) {
+      readSerial();
+      driveMotors();
+    }
+    PT_SLEEP(pt, 1);
+  }
+  PT_END(pt);
+}
+
 void setup() {
   pinMode(BUZZER, OUTPUT);
+  ultraSetup();
 #ifdef PIXEL_PIN
   pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
   pixels.clear(); // Set all pixel colors to 'off'
@@ -353,110 +522,14 @@ void setup() {
   pinMode(BATT, INPUT);
   pinMode(BUZZER, OUTPUT);
   initCommands();
+  PT_INIT(&ptUltra);
+  PT_INIT(&ptGyro);
+  PT_INIT(&ptSerial);
   prompt();
 }
 
-void initCommands(){
-  addNativeFun("m", c_setMotorAngle);
-  addNativeFun("d", c_failsafe);
-  addNativeFun("g", c_pushMotorAngle);
-  addNativeFun("s", c_shutServo);
-  addNativeFun("p", c_printState);
-  addNativeFun("beep", c_beep);
-  addNativeFun("sleep", c_sleep);
-  addNativeFun("leg", c_setLegAngles);
-  addNativeFun("pose", c_pose);
-  addNativeFun("legpose", c_legPose);
-}
-
-void printHeader(){
-  PT("-- ");
-}
-
-void printVoltage(float voltage){
-  PT("b ");
-  PT(voltage);
-  PTL();
-}
-
-void printGravity(){
-  PT("g ");
-  PT(gravity.x);
-  PT(" ");
-  PT(gravity.y);
-  PT(" ");
-  PT(gravity.z);
-  PTL();
-}
-
-void printIR(){
-  //Rather than try to decode on-device, just plonk the IR code directly out on the serial line.
-  if (irrecv.decode(&results)){
-    PT("i ");
-    PT(results.value);
-    PTL();
-    irrecv.resume();
-  }
-}
-
-void printUltrasound(){
-  //Nothing yet.  Need to figure out how we do this; a 50ms resolution on the TTL signal from the
-  //hc-sr04 gives an 8m range, which isn't useful.
-}
-
-void printTime(unsigned long ms){
-  PT("t ");
-  PT(ms);
-  PTL();
-}
-
-void printTimestamp(){
-  printTime(millis());
-}
-
-void printMotors(){
-  PT("m ");
-  for(int i = 0; i < DOF; i++){
-    PT(motorCommand[i]);
-    PT(" ");
-  }
-  PTL();
-}
-
-void prompt(){
-  PT("> ");
-}
-
-void readSerial(){
-  char *serial_c_str;
-  size_t len;
-
-  do {
-    String line = Serial.readStringUntil('\n');
-    PTL();
-    serial_c_str = line.c_str();
-    len = line.length();
-    if(len > 0){
-      interpret(serial_c_str, len);
-      PTL();
-      prompt();
-    }
-  } while (Serial.available() > 0);
-}
-
-void driveMotors(){
-  for (int i = 0; i < DOF; i++){
-    int16_t value = motorCommand[i];
-    if (value < -128 || value >= 128){
-      shutServo(i);
-    } else {
-      calibratedPWM(i, value);
-    }
-  }
-}
-
 void loop() {
-  readSerial();
-
-  driveMotors();
+  PT_SCHEDULE(ultraThread(&ptUltra));
+  PT_SCHEDULE(gyroThread(&ptGyro));
+  PT_SCHEDULE(serialThread(&ptSerial));
 }
